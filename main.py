@@ -43,8 +43,12 @@ with httpx.Client(timeout=10.0) as client:
                            json=payload,)
 
     response.raise_for_status()
-    json = json.dumps(response.json(), indent=2)
+    data = response.json()
+    json = json.dumps(data, indent=2)
 
 outputfile = Path("output.txt")
 with outputfile.open("w") as f:
     f.write(json)
+
+for classes in data['results']:
+    print(classes['code'])
