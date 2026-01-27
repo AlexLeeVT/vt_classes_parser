@@ -208,4 +208,6 @@ __marimo__/
 
 # custom
 output.txt
+pyoutput.txt
 pyproject.toml
+

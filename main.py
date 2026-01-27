@@ -49,17 +49,38 @@ def fetch_courses(program_level: ProgramLevel, discipline: Discipline, availabil
                                    json=payload,)
             _ = response.raise_for_status()
 
-            return json.dumps(response.json(), indent=2)
+            return response.json()
 
         except httpx.HTTPError as exc:
             print(f"HTTP Exception for {exc.request.url} - {exc}")
-            return None
+            return None 
 
+def parse_courses(data: list):
+    courses = {} 
+    for course in data:
+        title = course["title"]
+        crn = course["crn"]
 
+        if title not in courses:
+            courses[title] = {
+                "code": course["code"],
+                "crn":[crn]
+            }
+        else:
+            courses[title]["crn"] += [crn]
 
+    return courses
 
-# outputfile = Path("output.txt")
-# with outputfile.open("w") as f:
-#     f.write(json)
-# 
-# courses = data["results"]
+if __name__ == "__main__":
+    fetched_data = fetch_courses(ProgramLevel.GRAD, Discipline.ECE, Availability.OPEN_OR_FULL)
+    if not fetched_data:
+        print(f"Error retrieving class data from classes.vt.edu")
+        exit()
+
+    results = fetched_data["results"]
+    courses = parse_courses(results)
+    for course in courses:
+        print(f"{course}, {courses[course]["code"]}, crn: {courses[course]["crn"] if len(courses[course]["crn"]) < 30 else courses[course]["crn"][:5]}")
+#    JSON_ECECourses = json.dumps(fetched_data, indent=2)
+#    with Path("output.txt").open("w") as f:
+#        f.write(JSON_ECECourses)
