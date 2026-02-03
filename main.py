@@ -3,11 +3,16 @@ from enum import StrEnum
 import httpx
 from urllib.parse import urlencode
 import json
+from pandas import DataFrame
 
 from pathlib import Path
-from tomlkit import parse, document 
+from tomlkit import parse 
 from tomlkit.toml_file import TOMLFile
-import tomlkit
+
+from bs4 import BeautifulSoup
+#from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn
+
+from concurrent.futures import ThreadPoolExecutor
 
 url = "https://classes.vt.edu/api/"
 
@@ -26,7 +31,6 @@ class Availability(StrEnum):
 class Query(StrEnum):
     SEARCH="search"
     DETAILS="details"
-
     
 def fetch_courses(program_level: ProgramLevel, discipline: Discipline, availability: Availability):
     search_params = {
@@ -60,21 +64,25 @@ def fetch_courses(program_level: ProgramLevel, discipline: Discipline, availabil
             print(f"HTTP Exception for {exc.request.url} - {exc}")
             return None 
 
+blacklisted_courses = ['ECE 5904', 'ECE 5974', 'ECE 5994', 'ECE 7994']
 def parse_courses(data: list):
-    courses = {} 
+    courses = []
     for course in data:
         title = course["title"]
         crn = course["crn"]
         code = course["code"]
 
-        courses[crn] = {
+        if code in blacklisted_courses:
+            continue
+
+        courses.append({ "crn": crn,
             "code": code,
             "title": title,
-        }
+        })
 
     return courses
 
-def fetch_info(token: dict, code, crn):
+def fetch_info(crn, code, token: dict,):
     srcdb = 202601
 
     search_params = {
@@ -104,9 +112,9 @@ def fetch_info(token: dict, code, crn):
 
         except httpx.HTTPError as exc:
             print(f"HTTP Exception for {exc.request.url} - {exc}")
-            return None 
+            return {} 
 
-def is_valid_config(doc: tomlkit.TOMLDocument):
+def is_valid_config(id_data: dict):
     """
     checks if config has all valid fields.
     Input
@@ -115,15 +123,15 @@ def is_valid_config(doc: tomlkit.TOMLDocument):
         - True if config file is valid
         - False if config file 
     """
-    if '_pers' not in doc:
+    if '_pers' not in id_data:
         print("no pers field")
         return False
         
-    if 'id' not in doc['_pers']:
+    if 'id' not in id_data['_pers']:
         print("no id")
         return False
 
-    if 'idProof' not in doc['_pers']:
+    if 'idProof' not in id_data['_pers']:
         print("no idproof")
         return False
     return True
@@ -136,7 +144,8 @@ def generate_config(output: Path):
 f"""[_pers]
 id="{id}"
 idProof="{idProof}"
-""")
+"""
+    )
 
     TOMLFile(output.as_posix()).write(token)
     return token
@@ -155,7 +164,8 @@ def get_personal_token():
 
     # read from file and ensure config is complete
     doc_file = TOMLFile(token_file.as_posix())
-    doc = doc_file.read()
+    doc = doc_file.read().unwrap()
+
     if is_valid_config(doc):
         token_id = parse(
 f"""[_pers]
@@ -170,23 +180,79 @@ idProof="{doc['_pers']['idProof']}"
 
     return token_id.unwrap()
 
+def get_schedule(meeting_times: str):
+    """
+    html parse to schedule
+    Input
+      - meeting_times (str): meeting time as html
+    Output
+      - list: meeting times as string list
+    """
+    soup = BeautifulSoup(meeting_times, 'html.parser')
+
+    times = []
+    for th in soup.select("div.meet"):
+        meeting_text = str(th.find(string=True, recursive=False))
+        times.append(meeting_text)
+
+    room_html = soup.select_one("span[class^='meet-room']")
+    room = "N/A"
+    if room_html:
+        room = room_html.get_text(strip=True).removeprefix("in ").strip()
+
+    return times, room 
+
+def get_comment(comment: str):
+    soup = BeautifulSoup(comment, 'html.parser')
+    for p in soup.find_all("p"):
+        p.unwrap()
+
+    return str(soup)
+
+def parse_info(crn, code):
+    # change to fetch_details
+    info = fetch_info(crn, code, token)
+    JSON_info = json.dumps(info, indent=2)
+    with Path("output.txt").open("w") as f:
+        f.write(JSON_info)
+
+    modality = info['modality']
+    meeting_times, room = get_schedule(info['meeting_html'])
+    comments = get_comment(info['clssnotes'])
+    campus = info['camp_html']
+
+    print(f"parsed {crn}: {code}")
+    return (modality, meeting_times, room, comments, campus)
+
 # need clssnotes
 if __name__ == "__main__":
     token = get_personal_token()
-    fetched_data = fetch_courses(ProgramLevel.GRAD, Discipline.ECE, Availability.OPEN_OR_FULL)
+    fetched_data = fetch_courses(
+        ProgramLevel.GRAD, 
+        Discipline.ECE, 
+        Availability.OPEN_OR_FULL
+    )
+
     if not fetched_data:
         print(f"Error retrieving class data from classes.vt.edu")
         exit()
 
     results = fetched_data["results"]
     courses = parse_courses(results)
-    for crn in courses:
-        course = courses[crn]
 
-        # change to fetch_details
-        info = fetch_info(token, course['code'], crn)
-        JSON_info = json.dumps(info, indent=2)
-        with Path("output.txt").open("w") as f:
-            f.write(JSON_info)
+    # multithread process, only allow 5 at a time to do work to reduce load on vt server
+    futures = []        
+    for course in courses:
+        crn = course['crn']
+        code = course['code']
 
-        break
+        modality, meeting_times, room, comments, campus = parse_info(crn,code)
+
+        course['campus'] = campus
+        course['modality'] = modality
+        course['room'] = room
+        course['meeting_times'] = meeting_times
+        course['comment'] = comments
+
+    data = DataFrame(courses).sort_values(by=['crn'])
+    data.to_csv("courses.csv", index=False)
