@@ -10,7 +10,9 @@ from tomlkit import parse
 from tomlkit.toml_file import TOMLFile
 
 from bs4 import BeautifulSoup
-#from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn
+from rich.progress import (
+        Progress, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn
+)
 
 from concurrent.futures import ThreadPoolExecutor
 
@@ -221,38 +223,55 @@ def parse_info(crn, code):
     comments = get_comment(info['clssnotes'])
     campus = info['camp_html']
 
-    print(f"parsed {crn}: {code}")
     return (modality, meeting_times, room, comments, campus)
 
 # need clssnotes
 if __name__ == "__main__":
-    token = get_personal_token()
-    fetched_data = fetch_courses(
-        ProgramLevel.GRAD, 
-        Discipline.ECE, 
-        Availability.OPEN_OR_FULL
-    )
+    with Progress (
+        TextColumn("[bold yellow]{task.fields[stage]}", justify="left"),
+        BarColumn(bar_width=40),
+        TaskProgressColumn(show_speed=True),
+        TimeRemainingColumn(),
+    ) as progress:
+        task = progress.add_task(stage="Getting Courses...", total = 0, description="")
+        token = get_personal_token()
+        fetched_data = fetch_courses(
+            ProgramLevel.GRAD, 
+            Discipline.ECE, 
+            Availability.OPEN_OR_FULL
+        )
 
-    if not fetched_data:
-        print(f"Error retrieving class data from classes.vt.edu")
-        exit()
+        if not fetched_data:
+            print(f"Error retrieving class data from classes.vt.edu")
+            exit()
 
-    results = fetched_data["results"]
-    courses = parse_courses(results)
+        results = fetched_data["results"]
+        courses = parse_courses(results)
+        progress.update(task, total=len(courses))
 
-    # multithread process, only allow 5 at a time to do work to reduce load on vt server
-    futures = []        
-    for course in courses:
-        crn = course['crn']
-        code = course['code']
+        # multithread process, only allow 5 at a time to do work to reduce load on vt server
+        for course in courses:
+            crn = course['crn']
+            code = course['code']
 
-        modality, meeting_times, room, comments, campus = parse_info(crn,code)
+            progress.update(task, stage=f"[bold cyan]Fetching course: {code}")
+            modality, meeting_times, room, comments, campus = parse_info(crn,code)
 
-        course['campus'] = campus
-        course['modality'] = modality
-        course['room'] = room
-        course['meeting_times'] = meeting_times
-        course['comment'] = comments
+            # add details to course
+            course['campus'] = campus
+            course['modality'] = modality
+            course['room'] = room
+            course['meeting_times'] = meeting_times
+            course['comment'] = comments
 
-    data = DataFrame(courses).sort_values(by=['crn'])
-    data.to_csv("courses.csv", index=False)
+            progress.update(task, advance=1)
+
+        progress.update(task, stage="Output to \"courses.csv\"")
+
+        data = DataFrame(courses).sort_values(by=['crn'])
+        try:
+            data.to_csv("courses.csv", index=False)
+        except:
+            print("error occured while attempting to write courses to \"courses.csv\"")
+
+        progress.update(task, stage="[bold green]Complete")
