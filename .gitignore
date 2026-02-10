@@ -212,3 +212,4 @@ pyoutput.txt
 pyproject.toml
 token_id
 *.csv
+*.xlsx

@@ -14,8 +14,6 @@ from rich.progress import (
         Progress, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn
 )
 
-from concurrent.futures import ThreadPoolExecutor
-
 url = "https://classes.vt.edu/api/"
 
 class ProgramLevel(StrEnum):
