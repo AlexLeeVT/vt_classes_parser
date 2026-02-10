@@ -15,6 +15,7 @@ from rich.progress import (
 )
 
 url = "https://classes.vt.edu/api/"
+srcdb = 202601
 
 class ProgramLevel(StrEnum):
     UNDERGRAD='coursetype_undergraduate'
@@ -33,6 +34,21 @@ class Query(StrEnum):
     DETAILS="details"
     
 def fetch_courses(program_level: ProgramLevel, discipline: Discipline, availability: Availability):
+    """
+    Query for a list of CRNs and course names. Return None if query is wrong.
+    Input:
+        - program_level:
+            - ProgramLevel.UNDERGRAD
+            - ProgramLevel.GRAD
+        - discipline:
+            - Discipline.ECE
+            - Discipline.CS
+        - availability:
+            - Availability.OPEN
+            - Availability.OPEN_OR_FULL
+    Output:
+        - courses: list of dictionaries containing key info
+    """
     search_params = {
         "page": "fose",
         "route": Query.SEARCH,
@@ -42,7 +58,7 @@ def fetch_courses(program_level: ProgramLevel, discipline: Discipline, availabil
     }
     payload = {
         "other": {
-            "srcdb": "202601"
+            "srcdb": srcdb
         },
         "criteria": [
             {"field": "stat", "value": availability},
@@ -52,6 +68,7 @@ def fetch_courses(program_level: ProgramLevel, discipline: Discipline, availabil
     }
     url_params = urlencode(search_params)
 
+    # POST request for CRN keys
     with httpx.Client(timeout=10.0) as client:
         try:
             response = client.post(f"{url}?{url_params}",
@@ -66,6 +83,14 @@ def fetch_courses(program_level: ProgramLevel, discipline: Discipline, availabil
 
 blacklisted_courses = ['ECE 5904', 'ECE 5974', 'ECE 5994', 'ECE 7994']
 def parse_courses(data: list):
+    f"""
+    Takes raw data from the classes.vt.edu website and cleans it. These classes are also removed for clarity:
+    {blacklisted_courses}
+    Input:
+        - data: raw data fetched from classes.vt.edu
+    Output:
+        - courses: organized course data
+    """
     courses = []
     for course in data:
         title = course["title"]
@@ -83,7 +108,15 @@ def parse_courses(data: list):
     return courses
 
 def fetch_info(crn, code, token: dict,):
-    srcdb = 202601
+    """
+    Queries classes.vt.edu for info on a specific class
+    Input:
+        - crn: CRN to search
+        - code: associated code to CRN
+        - token: personal ID for full info
+    Output:
+        - data: json file with all relevant course details
+    """
 
     search_params = {
         "page": "fose",
@@ -106,9 +139,7 @@ def fetch_info(crn, code, token: dict,):
                                    json=payload,)
             _ = response.raise_for_status()
 
-            data = response.json()
-
-            return data
+            return response.json()
 
         except httpx.HTTPError as exc:
             print(f"HTTP Exception for {exc.request.url} - {exc}")
@@ -263,7 +294,6 @@ if __name__ == "__main__":
             course['comment'] = comments
 
             progress.update(task, advance=1)
-
         progress.update(task, stage="Output to \"courses.csv\"")
 
         data = DataFrame(courses).sort_values(by=['crn'])
