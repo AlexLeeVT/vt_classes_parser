@@ -13,8 +13,8 @@ Python 12+ (untested on other versions)
 
 # WIP
 - [x] Backend
-    - [] Auto parse keys from user input
-- [] Frontend user interface
-- [] Minimize server usage
-- [] Executeable version
+    - [ ] Auto parse keys from user input
+- [ ] Frontend user interface
+- [ ] Minimize server usage
+- [ ] Executeable version
 
